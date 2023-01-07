@@ -1,10 +1,14 @@
 [
   {
     "ParameterKey": "EnvironmentName",
-    "ParameterValue": "UdagramClone-WIP"
+    "ParameterValue": "UdacityProject"
   },
   {
     "ParameterKey": "JumpServerKeyName",
     "ParameterValue": "udacity"
+  },
+  {
+    "ParameterKey": "BucketName",
+    "ParameterValue": "barak-udagram-clone"
   }
 ]

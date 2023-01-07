@@ -5,25 +5,20 @@ Parameters:
     Description: An environment name that will be prefixed to resource names
     Type: String
   AMIToUse:
-    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Type: String
     Default: 'ami-08fdec01f5df9998f'
     Description: 'ami to use for EC2 resources'
   LaunchTemplateVersionNumber:
     Type: String
     Default: "1"
-  JumpServerKeyName:
-    Description: The name of a pre-existing key-pair to use in accessing the jump server
-    Type: String
-  BucketName:
-    Description: The name of the bucket to fetch the application file
-    Type: String
 
 Resources:
   WebServerSecGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
       GroupDescription: Allow http to our hosts and SSH from local only
-      VpcId: !Sub ${EnvironmentName}-VPCID
+      VpcId:
+        Fn::ImportValue: !Sub ${EnvironmentName}-VPCID
       SecurityGroupIngress:
       - IpProtocol: tcp
         FromPort: 80
@@ -43,7 +38,8 @@ Resources:
     Type: AWS::EC2::SecurityGroup
     Properties:
       GroupDescription: Allow http to our load balancer
-      VpcId: !Sub ${EnvironmentName}-VPCID
+      VpcId:
+        Fn::ImportValue: !Sub ${EnvironmentName}-VPCID
       SecurityGroupIngress:
         - IpProtocol: tcp
           FromPort: 80
@@ -61,14 +57,12 @@ Resources:
       LaunchTemplateData:
         UserData:
           Fn::Base64: !Sub |
-            #!/bin/bash -xe
-            exec > >(tee /var/log/user-data.log|logger -t user-data -s 2>/dev/console) 2>&1
-            apt update -y
-            apt install -y apache2
-            systemctl start apache2
-            systemctl enable apache2
-            rm ../../var/www/html/index.html
-            wget -P ../../var/www/html https://s3.us-east-2.amazonaws.com/${BucketName}/index.html
+            #!/bin/bash
+            apt-get update -y
+            apt-get install apache2 -y
+            systemctl start apache2.service
+            cd /var/www/html
+            echo "Udacity Demo Web Server Up and Running!" > index.html
         ImageId: !Ref AMIToUse
         SecurityGroupIds:
         - !GetAtt WebServerSecGroup.GroupId
@@ -82,7 +76,7 @@ Resources:
     Type: AWS::AutoScaling::AutoScalingGroup
     Properties:
       VPCZoneIdentifier:
-      - !Join [",", [!Sub ${EnvironmentName}-PRI1-SN, !Sub ${EnvironmentName}-PRI2-SN]]
+      - Fn::ImportValue: !Sub "${EnvironmentName}-PRIV-NETS"
       LaunchTemplate:
         LaunchTemplateId: !Ref WebAppLaunchTemplate
         Version: !Ref LaunchTemplateVersionNumber
@@ -102,14 +96,15 @@ Resources:
       Port: 80
       Protocol: HTTP
       UnhealthyThresholdCount: 5
-      VpcId: !Sub ${EnvironmentName}-VPCID
+      VpcId:
+        Fn::ImportValue: !Sub ${EnvironmentName}-VPCID
 
   WebAppLB:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
     Properties:
       Subnets:
-      - !Sub ${EnvironmentName}-PUB1-SN
-      - !Sub ${EnvironmentName}-PUB2-SN
+      - Fn::ImportValue: !Sub ${EnvironmentName}-PUB1-SN
+      - Fn::ImportValue: !Sub ${EnvironmentName}-PUB2-SN
       SecurityGroups:
       - Ref: LBSecGroup
 
@@ -138,48 +133,9 @@ Resources:
       Priority: 1
 
 # ended web application resources
-
-# added jump server
-  JumpServerSecGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: Allow ssh to private servers via Jump servers
-      VpcId: !Sub ${EnvironmentName}-VPCID
-      SecurityGroupIngress:
-      - IpProtocol: tcp
-        FromPort: 22
-        ToPort: 22
-        CidrIp: 0.0.0.0/0
-      SecurityGroupEgress:
-      - IpProtocol: tcp
-        FromPort: 0
-        ToPort: 65535
-        CidrIp: 0.0.0.0/0
-  UdagramJumpBox:
-    Type: AWS::EC2::Instance
-    Properties:
-      InstanceType: t2.micro
-      ImageId: !Ref AMIToUse
-      NetworkInterfaces: 
-        - AssociatePublicIpAddress: true
-          DeviceIndex: "0"
-          GroupSet: 
-            - Ref: JumpServerSecGroup
-          SubnetId: !Sub ${EnvironmentName}-PUB1-SN
-      Tags:
-      - Key: Name
-        Value: Jumpbox
-      KeyName: !Ref JumpServerKeyName
-  
-# ended jump server config
-
 Outputs:
   WebAppLB:
     Description: A reference to the web application load balancer
     Value: !Join ["", ["http://", !GetAtt WebAppLB.DNSName]]
     Export:
       Name: !Sub ${EnvironmentName}-LB-URL
-
-  JumpServerIp:
-    Description: A reference to the jump server public IP
-    Value: !GetAtt UdagramJumpBox.PublicIp
